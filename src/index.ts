@@ -21,6 +21,7 @@ app.use(cors({
     'http://localhost:8081',     // Expo dev client
     'http://localhost:19006',    // Expo web
     'https://tun.brewlab.app',   // Production
+    'https://tun-app.pages.dev', // Cloudflare Pages
   ],
   allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowHeaders: ['Content-Type', 'Authorization'],
