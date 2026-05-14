@@ -1,0 +1,45 @@
+name = "brewlab-api"
+main = "src/index.ts"
+compatibility_date = "2025-05-14"
+compatibility_flags = ["nodejs_compat"]
+
+# D1 Database
+[[d1_databases]]
+binding = "DB"
+database_name = "brewlab-db"
+database_id = "5126b44a-8841-4ea1-97e1-d190e41a632a"
+migrations_dir = "drizzle/migrations"
+
+# R2 Bucket (batch photos)
+[[r2_buckets]]
+binding = "PHOTOS"
+bucket_name = "brewlab-photos"
+
+# Environment variables (set via `wrangler secret put` for production)
+[vars]
+CLERK_PUBLISHABLE_KEY = "pk_test_ZW5oYW5jZWQtdG91Y2FuLTI4LmNsZXJrLmFjY291bnRzLmRldiQ"
+
+# Secrets (do not commit values — set via `wrangler secret put`):
+# CLERK_SECRET_KEY
+# CLERK_JWKS_URL
+
+# Development environment
+[env.dev]
+name = "brewlab-api-dev"
+
+# Production environment
+[env.production]
+name = "brewlab-api"
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "brewlab-db"
+database_id = "5126b44a-8841-4ea1-97e1-d190e41a632a"
+migrations_dir = "drizzle/migrations"
+
+[[env.production.r2_buckets]]
+binding = "PHOTOS"
+bucket_name = "brewlab-photos"
+
+[env.production.vars]
+CLERK_PUBLISHABLE_KEY = "pk_test_ZW5oYW5jZWQtdG91Y2FuLTI4LmNsZXJrLmFjY291bnRzLmRldiQ"

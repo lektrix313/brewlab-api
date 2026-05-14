@@ -1,0 +1,26 @@
+{
+  "name": "@tun/brewlab-api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "wrangler d1 migrations apply brewlab-db",
+    "db:studio": "drizzle-kit studio",
+    "types": "wrangler types"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.41.0",
+    "hono": "^4.7.0",
+    "jose": "^6.0.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250514.0",
+    "drizzle-kit": "^0.31.0",
+    "typescript": "^5.8.0",
+    "wrangler": "^4.91.0"
+  }
+}
