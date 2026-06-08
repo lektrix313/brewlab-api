@@ -94,6 +94,8 @@ const pushSchema = z.object({
   measurements: z.array(z.record(z.any())).default([]),
   inventory: z.array(z.record(z.any())).default([]),
   shoppingList: z.array(z.record(z.any())).default([]),
+  deletedRecipeIds: z.array(z.string()).default([]),
+  deletedBatchIds: z.array(z.string()).default([]),
 });
 
 syncRouter.post('/push', clerkAuth, async (c) => {
@@ -105,51 +107,112 @@ syncRouter.post('/push', clerkAuth, async (c) => {
     return c.json({ error: 'Invalid input', details: parse.error.flatten() }, 400);
   }
 
-  const { recipes: recipeOps, batches: batchOps, measurements: measurementOps, inventory: inventoryOps, shoppingList: shoppingListOps } = parse.data;
+  const {
+    recipes: recipeOps,
+    batches: batchOps,
+    measurements: measurementOps,
+    inventory: inventoryOps,
+    shoppingList: shoppingListOps,
+    deletedRecipeIds,
+    deletedBatchIds,
+  } = parse.data;
 
   if (recipeOps.length > 0) {
     for (const r of recipeOps) {
-      await db.insert(recipes).values({ ...r, userId: auth.userId } as any).onConflictDoUpdate({
-        target: recipes.id,
-        set: { ...r, updatedAt: new Date() },
-      });
+      const existing = await db.select().from(recipes).where(eq(recipes.id, r.id)).get();
+      if (existing && existing.userId !== auth.userId) {
+        return c.json({ error: 'Forbidden recipe id', id: r.id }, 403);
+      }
+
+      const safeRecipe = { ...r, userId: auth.userId, updatedAt: new Date() };
+      if (existing) {
+        await db.update(recipes).set(safeRecipe as any).where(and(eq(recipes.id, r.id), eq(recipes.userId, auth.userId)));
+      } else {
+        await db.insert(recipes).values(safeRecipe as any);
+      }
     }
   }
 
   if (batchOps.length > 0) {
     for (const b of batchOps) {
-      await db.insert(batches).values({ ...b, userId: auth.userId } as any).onConflictDoUpdate({
-        target: batches.id,
-        set: { ...b, updatedAt: new Date() },
-      });
+      const existing = await db.select().from(batches).where(eq(batches.id, b.id)).get();
+      if (existing && existing.userId !== auth.userId) {
+        return c.json({ error: 'Forbidden batch id', id: b.id }, 403);
+      }
+
+      const safeBatch = { ...b, userId: auth.userId, updatedAt: new Date() };
+      if (existing) {
+        await db.update(batches).set(safeBatch as any).where(and(eq(batches.id, b.id), eq(batches.userId, auth.userId)));
+      } else {
+        await db.insert(batches).values(safeBatch as any);
+      }
     }
   }
 
   if (measurementOps.length > 0) {
     for (const m of measurementOps) {
-      await db.insert(measurements).values(m as any).onConflictDoUpdate({
-        target: measurements.id,
-        set: m,
-      });
+      const batch = await db.select().from(batches).where(eq(batches.id, m.batchId)).get();
+      if (!batch || batch.userId !== auth.userId) {
+        return c.json({ error: 'Forbidden measurement batch', id: m.id, batchId: m.batchId }, 403);
+      }
+
+      const existingRows = await db
+        .select({ measurement: measurements, batch: batches })
+        .from(measurements)
+        .innerJoin(batches, eq(measurements.batchId, batches.id))
+        .where(eq(measurements.id, m.id))
+        .all();
+      const existing = existingRows[0];
+      if (existing && existing.batch.userId !== auth.userId) {
+        return c.json({ error: 'Forbidden measurement id', id: m.id }, 403);
+      }
+
+      if (existing) {
+        await db.update(measurements).set(m as any).where(eq(measurements.id, m.id));
+      } else {
+        await db.insert(measurements).values(m as any);
+      }
     }
   }
 
   if (inventoryOps.length > 0) {
     for (const item of inventoryOps) {
-      await db.insert(inventoryItems).values({ ...item, userId: auth.userId } as any).onConflictDoUpdate({
-        target: inventoryItems.id,
-        set: { ...item, updatedAt: new Date() },
-      });
+      const existing = await db.select().from(inventoryItems).where(eq(inventoryItems.id, item.id)).get();
+      if (existing && existing.userId !== auth.userId) {
+        return c.json({ error: 'Forbidden inventory id', id: item.id }, 403);
+      }
+
+      const safeItem = { ...item, userId: auth.userId, updatedAt: new Date() };
+      if (existing) {
+        await db.update(inventoryItems).set(safeItem as any).where(and(eq(inventoryItems.id, item.id), eq(inventoryItems.userId, auth.userId)));
+      } else {
+        await db.insert(inventoryItems).values(safeItem as any);
+      }
     }
   }
 
   if (shoppingListOps.length > 0) {
     for (const item of shoppingListOps) {
-      await db.insert(shoppingListItems).values({ ...item, userId: auth.userId } as any).onConflictDoUpdate({
-        target: shoppingListItems.id,
-        set: item,
-      });
+      const existing = await db.select().from(shoppingListItems).where(eq(shoppingListItems.id, item.id)).get();
+      if (existing && existing.userId !== auth.userId) {
+        return c.json({ error: 'Forbidden shopping list id', id: item.id }, 403);
+      }
+
+      const safeItem = { ...item, userId: auth.userId };
+      if (existing) {
+        await db.update(shoppingListItems).set(safeItem as any).where(and(eq(shoppingListItems.id, item.id), eq(shoppingListItems.userId, auth.userId)));
+      } else {
+        await db.insert(shoppingListItems).values(safeItem as any);
+      }
     }
+  }
+
+  for (const id of deletedRecipeIds) {
+    await db.delete(recipes).where(and(eq(recipes.id, id), eq(recipes.userId, auth.userId)));
+  }
+
+  for (const id of deletedBatchIds) {
+    await db.delete(batches).where(and(eq(batches.id, id), eq(batches.userId, auth.userId)));
   }
 
   return c.json({
@@ -161,6 +224,8 @@ syncRouter.post('/push', clerkAuth, async (c) => {
       measurements: measurementOps.length,
       inventory: inventoryOps.length,
       shoppingList: shoppingListOps.length,
+      deletedRecipes: deletedRecipeIds.length,
+      deletedBatches: deletedBatchIds.length,
     },
   });
 });
