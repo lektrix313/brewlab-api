@@ -8,6 +8,54 @@ export const users = sqliteTable('users', {
   createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
 });
 
+export const profiles = sqliteTable('profiles', {
+  userId: text('user_id').primaryKey().references(() => users.id, { onDelete: 'cascade' }),
+  handle: text('handle').notNull(),
+  handleNormalized: text('handle_normalized').notNull().unique(),
+  displayName: text('display_name').notNull().default('Community brewer'),
+  avatarUrl: text('avatar_url'),
+  bio: text('bio'),
+  locationLabel: text('location_label'),
+  experience: text('experience').notNull().default('starting'),
+  favouriteStyles: text('favourite_styles', { mode: 'json' }).notNull().$defaultFn(() => []),
+  isPrivate: integer('is_private', { mode: 'boolean' }).notNull().default(false),
+  showConnectionLists: integer('show_connection_lists', { mode: 'boolean' }).notNull().default(true),
+  defaultPostVisibility: text('default_post_visibility').notNull().default('public'),
+  commentPermission: text('comment_permission').notNull().default('everyone'),
+  mentionPermission: text('mention_permission').notNull().default('everyone'),
+  createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
+});
+
+export const follows = sqliteTable('follows', {
+  followerId: text('follower_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  followingId: text('following_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  status: text('status').notNull().default('pending'),
+  notifyPosts: integer('notify_posts', { mode: 'boolean' }).notNull().default(false),
+  createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
+  acceptedAt: integer('accepted_at', { mode: 'timestamp' }),
+});
+
+export const userModerationEdges = sqliteTable('user_moderation_edges', {
+  actorId: text('actor_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  subjectId: text('subject_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  kind: text('kind').notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
+});
+
+export const activityEvents = sqliteTable('activity_events', {
+  id: text('id').primaryKey(),
+  recipientId: text('recipient_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  actorId: text('actor_id').references(() => users.id, { onDelete: 'set null' }),
+  kind: text('kind').notNull(),
+  entityType: text('entity_type'),
+  entityId: text('entity_id'),
+  metadata: text('metadata', { mode: 'json' }).notNull().$defaultFn(() => ({})),
+  dedupeKey: text('dedupe_key').unique(),
+  readAt: integer('read_at', { mode: 'timestamp' }),
+  createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
+});
+
 export const recipes = sqliteTable('recipes', {
   id: text('id').primaryKey(),
   userId: text('user_id')
@@ -155,6 +203,8 @@ export const batchCosts = sqliteTable('batch_costs', {
 // Types inferred from schema
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
+export type Profile = typeof profiles.$inferSelect;
+export type InsertProfile = typeof profiles.$inferInsert;
 export type Recipe = typeof recipes.$inferSelect;
 export type InsertRecipe = typeof recipes.$inferInsert;
 export type Batch = typeof batches.$inferSelect;

@@ -12,6 +12,7 @@ import inventoryRouter from './routes/inventory';
 import shoppingListRouter from './routes/shopping-list';
 import batchCostRouter from './routes/batch-costs';
 import communityRouter from './routes/community';
+import socialRouter from './routes/social';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -24,7 +25,7 @@ app.use(cors({
     'https://tun.brewlab.app',   // Production
     'https://tun-app.pages.dev', // Cloudflare Pages
   ],
-  allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowHeaders: ['Content-Type', 'Authorization'],
   credentials: true,
 }));
@@ -46,6 +47,7 @@ app.route('/inventory', inventoryRouter);
 app.route('/shopping-list', shoppingListRouter);
 app.route('/batch-costs', batchCostRouter);
 app.route('/community', communityRouter);
+app.route('/community', socialRouter);
 
 // Error handling
 app.onError((err, c) => {
