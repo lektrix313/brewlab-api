@@ -11,6 +11,7 @@ import syncRouter from './routes/sync';
 import inventoryRouter from './routes/inventory';
 import shoppingListRouter from './routes/shopping-list';
 import batchCostRouter from './routes/batch-costs';
+import communityRouter from './routes/community';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -44,6 +45,7 @@ app.route('/sync', syncRouter);
 app.route('/inventory', inventoryRouter);
 app.route('/shopping-list', shoppingListRouter);
 app.route('/batch-costs', batchCostRouter);
+app.route('/community', communityRouter);
 
 // Error handling
 app.onError((err, c) => {
