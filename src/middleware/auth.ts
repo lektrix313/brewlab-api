@@ -2,7 +2,7 @@ import { createMiddleware } from 'hono/factory';
 import { jwtVerify, createRemoteJWKSet } from 'jose';
 import type { Env } from '../db/client';
 import { createDb } from '../db/client';
-import { users } from '../db/schema';
+import { profiles, users } from '../db/schema';
 
 export type AuthContext = {
   userId: string;
@@ -54,6 +54,17 @@ export const clerkAuth = createMiddleware<{ Bindings: Env; Variables: { auth: Au
         .insert(users)
         .values({ id: userId, email: resolvedEmail })
         .onConflictDoNothing({ target: users.id });
+      const handle = `brewer.${userId.replace(/[^a-zA-Z0-9]/g, '').slice(-10).toLowerCase()}`;
+      await db
+        .insert(profiles)
+        .values({
+          userId,
+          handle,
+          handleNormalized: handle,
+          displayName: typeof payload.name === 'string' ? payload.name : 'Community brewer',
+          avatarUrl: typeof payload.picture === 'string' ? payload.picture : null,
+        })
+        .onConflictDoNothing();
 
       c.set('auth', { userId, email: resolvedEmail });
       await next();
