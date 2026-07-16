@@ -21,6 +21,20 @@ const postSelect = `SELECT p.*, u.display_name, u.avatar_url,
   (SELECT COUNT(*) FROM community_plans x WHERE x.post_id = p.id) AS brew_count
   FROM community_posts p LEFT JOIN users u ON u.id = p.author_id`;
 
+community.post('/media', clerkAuth, async (c) => {
+  const auth = c.get('auth'); const form = await c.req.formData(); const value = form.get('file');
+  if (!value || typeof value === 'string') return c.json({ error: 'Invalid image' }, 400); const file = value as unknown as File;
+  if (!file.type.startsWith('image/') || file.size > 12 * 1024 * 1024) return c.json({ error: 'Invalid image' }, 400);
+  const extension = file.type.split('/')[1]?.replace('jpeg', 'jpg') || 'jpg'; const key = `community/${auth.userId}/${crypto.randomUUID()}.${extension}`;
+  await c.env.PHOTOS.put(key, file.stream(), { httpMetadata: { contentType: file.type }, customMetadata: { owner: auth.userId } });
+  const origin = new URL(c.req.url).origin; return c.json({ data: { id: `media-${crypto.randomUUID()}`, url: `${origin}/community/media/${encodeURIComponent(key)}`, position: 0 } }, 201);
+});
+
+community.get('/media/:key{.+}', async (c) => {
+  const object = await c.env.PHOTOS.get(decodeURIComponent(c.req.param('key'))); if (!object) return c.json({ error: 'Image not found' }, 404);
+  const headers = new Headers(); object.writeHttpMetadata(headers); headers.set('Cache-Control', 'public, max-age=31536000, immutable'); return new Response(object.body, { headers });
+});
+
 community.get('/posts', optionalAuth, async (c) => {
   const result = await c.env.DB.prepare(`${postSelect} ORDER BY p.created_at DESC LIMIT 30`).all<Record<string, unknown>>();
   return c.json({ data: { items: (result.results || []).map(shapePost), cursor: null } });
@@ -31,12 +45,13 @@ community.get('/posts/:id', optionalAuth, async (c) => {
   return row ? c.json({ data: shapePost(row) }) : c.json({ error: 'Post not found' }, 404);
 });
 
-const createPost = z.object({ batchId: z.string().optional(), title: z.string().min(1).max(200), tastingSummary: z.string().max(1000).optional(), workedWell: z.string().max(1000).optional(), changeNextTime: z.string().max(1000).optional(), difficulty: z.enum(['approachable', 'involved', 'advanced']).default('involved'), commentsEnabled: z.boolean().default(true), recipeSnapshot: z.record(z.any()), batchSummary: z.record(z.any()).optional() });
+const createPost = z.object({ batchId: z.string().optional(), title: z.string().min(1).max(200), tastingSummary: z.string().max(1000).optional(), workedWell: z.string().max(1000).optional(), changeNextTime: z.string().max(1000).optional(), difficulty: z.enum(['approachable', 'involved', 'advanced']).default('involved'), commentsEnabled: z.boolean().default(true), recipeSnapshot: z.record(z.any()), batchSummary: z.record(z.any()).optional(), media: z.array(z.object({ id: z.string(), url: z.string().url(), position: z.number() })).max(6).default([]) });
 community.post('/posts', clerkAuth, async (c) => {
   const parsed = createPost.safeParse(await c.req.json()); if (!parsed.success) return c.json({ error: 'Invalid post', details: parsed.error.flatten() }, 400);
   const auth = c.get('auth'); const body = parsed.data; const id = `post-${crypto.randomUUID()}`; const now = Date.now();
   await c.env.DB.prepare(`INSERT INTO community_posts (id, author_id, batch_id, title, tasting_summary, worked_well, change_next_time, difficulty, recipe_snapshot, batch_summary, media, comments_enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', ?, ?, ?)`)
     .bind(id, auth.userId, body.batchId || null, body.title, body.tastingSummary || null, body.workedWell || null, body.changeNextTime || null, body.difficulty, JSON.stringify(body.recipeSnapshot), body.batchSummary ? JSON.stringify(body.batchSummary) : null, body.commentsEnabled ? 1 : 0, now, now).run();
+  await c.env.DB.prepare('UPDATE community_posts SET media = ? WHERE id = ?').bind(JSON.stringify(body.media), id).run();
   const row = await c.env.DB.prepare(`${postSelect} WHERE p.id = ?`).bind(id).first<Record<string, unknown>>(); return c.json({ data: shapePost(row!) }, 201);
 });
 
