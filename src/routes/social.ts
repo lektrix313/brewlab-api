@@ -8,7 +8,10 @@ type Auth = { userId: string; email: string };
 
 const social = new Hono<{ Bindings: Env; Variables: { auth?: Auth } }>();
 const now = () => Date.now();
-const iso = (value: unknown) => new Date(Number(value) || Date.now()).toISOString();
+const iso = (value: unknown) => {
+  const numeric = Number(value) || Date.now();
+  return new Date(numeric < 1_000_000_000_000 ? numeric * 1000 : numeric).toISOString();
+};
 const json = <T>(value: unknown, fallback: T): T => {
   try { return (typeof value === 'string' ? JSON.parse(value) : value ?? fallback) as T; } catch { return fallback; }
 };
