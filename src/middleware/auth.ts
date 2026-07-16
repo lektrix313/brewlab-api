@@ -1,6 +1,8 @@
 import { createMiddleware } from 'hono/factory';
 import { jwtVerify, createRemoteJWKSet } from 'jose';
 import type { Env } from '../db/client';
+import { createDb } from '../db/client';
+import { users } from '../db/schema';
 
 export type AuthContext = {
   userId: string;
@@ -43,7 +45,17 @@ export const clerkAuth = createMiddleware<{ Bindings: Env; Variables: { auth: Au
         return c.json({ error: 'Unauthorized — invalid token payload' }, 401);
       }
 
-      c.set('auth', { userId, email: email ?? '' });
+      // All synced domain records reference users.id. Clerk authenticates the
+      // person, but a webhook is not guaranteed to have provisioned the local
+      // row before their first sync, so create it atomically on first request.
+      const resolvedEmail = email ?? `${userId}@users.invalid`;
+      const db = createDb(c.env.DB);
+      await db
+        .insert(users)
+        .values({ id: userId, email: resolvedEmail })
+        .onConflictDoNothing({ target: users.id });
+
+      c.set('auth', { userId, email: resolvedEmail });
       await next();
     } catch (err) {
       console.error('JWT verification failed:', err);
