@@ -63,6 +63,10 @@ export const batches = sqliteTable('batches', {
   startedAt: integer('started_at', { mode: 'timestamp' }),
   estimatedReadyAt: integer('estimated_ready_at', { mode: 'timestamp' }),
   completedAt: integer('completed_at', { mode: 'timestamp' }),
+  packagedAt: integer('packaged_at', { mode: 'timestamp' }),
+  finishedAt: integer('finished_at', { mode: 'timestamp' }),
+  batchSerial: text('batch_serial'),
+  communityPostId: text('community_post_id'),
   predictedCurve: text('predicted_curve', { mode: 'json' }),
 
   // Water chemistry at brew time

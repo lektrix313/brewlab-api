@@ -88,6 +88,10 @@ const updateBatchSchema = z.object({
   startedAt: z.string().datetime().optional(),
   estimatedReadyAt: z.string().datetime().optional(),
   completedAt: z.string().datetime().optional(),
+  packagedAt: z.string().datetime().optional(),
+  finishedAt: z.string().datetime().optional(),
+  batchSerial: z.string().max(40).optional(),
+  communityPostId: z.string().max(100).optional(),
   predictedCurve: z.array(z.record(z.any())).optional(),
   isPublic: z.boolean().optional(),
 }).partial();
@@ -112,6 +116,10 @@ batchRouter.put('/:id', clerkAuth, async (c) => {
   if (body.startedAt !== undefined) updateData.startedAt = body.startedAt ? new Date(body.startedAt) : null;
   if (body.estimatedReadyAt !== undefined) updateData.estimatedReadyAt = body.estimatedReadyAt ? new Date(body.estimatedReadyAt) : null;
   if (body.completedAt !== undefined) updateData.completedAt = body.completedAt ? new Date(body.completedAt) : null;
+  if (body.packagedAt !== undefined) updateData.packagedAt = body.packagedAt ? new Date(body.packagedAt) : null;
+  if (body.finishedAt !== undefined) updateData.finishedAt = body.finishedAt ? new Date(body.finishedAt) : null;
+  if (body.batchSerial !== undefined) updateData.batchSerial = body.batchSerial;
+  if (body.communityPostId !== undefined) updateData.communityPostId = body.communityPostId;
 
   await db.update(batches).set(updateData).where(eq(batches.id, id));
 
