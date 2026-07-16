@@ -54,8 +54,16 @@ app.onError((err, c) => {
   if (err instanceof HTTPException) {
     return err.getResponse();
   }
-  console.error('Unhandled error:', err);
-  return c.json({ error: 'Internal server error' }, 500);
+  const requestId = c.req.header('cf-ray') || crypto.randomUUID();
+  console.error(JSON.stringify({
+    event: 'unhandled_error',
+    requestId,
+    method: c.req.method,
+    path: c.req.path,
+    error: err instanceof Error ? err.message : String(err),
+    stack: err instanceof Error ? err.stack : undefined,
+  }));
+  return c.json({ error: 'Internal server error', requestId }, 500);
 });
 
 // 404

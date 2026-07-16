@@ -39,7 +39,12 @@ export const clerkAuth = createMiddleware<{ Bindings: Env; Variables: { auth: Au
         // and rely on signature + audience (sub) instead
       }));
     } catch (err) {
-      console.error('JWT verification failed:', err);
+      console.warn(JSON.stringify({
+        event: 'auth_rejected',
+        requestId: c.req.header('cf-ray') || crypto.randomUUID(),
+        path: c.req.path,
+        reason: err instanceof Error ? err.name : 'unknown',
+      }));
       return c.json({ error: 'Unauthorized — invalid token' }, 401);
     }
 
