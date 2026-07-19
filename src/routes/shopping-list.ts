@@ -75,7 +75,7 @@ router.put('/:id', clerkAuth, async (c) => {
 
   await db
     .update(shoppingListItems)
-    .set(parse.data)
+    .set({ ...parse.data, updatedAt: new Date() })
     .where(eq(shoppingListItems.id, id));
 
   const [updated] = await db.select().from(shoppingListItems).where(eq(shoppingListItems.id, id)).all();

@@ -3,7 +3,7 @@ import { eq, gte, and } from 'drizzle-orm';
 import { z } from 'zod';
 import { createDb } from '../db/client';
 import type { Env } from '../db/client';
-import { recipes, batches, measurements, notes, photos, inventoryItems, shoppingListItems } from '../db/schema';
+import { recipes, batches, measurements, notes, photos, inventoryItems, shoppingListItems, syncTombstones } from '../db/schema';
 import { clerkAuth } from '../middleware/auth';
 
 const syncRouter = new Hono<{ Bindings: Env }>();
@@ -24,7 +24,7 @@ syncRouter.get('/', clerkAuth, async (c) => {
 
   const userId = auth.userId;
 
-  const [userRecipes, userBatches, userMeasurements, userNotes, userPhotos, userInventory, userShoppingList] = await Promise.all([
+  const [userRecipes, userBatches, userMeasurements, userNotes, userPhotos, userInventory, userShoppingList, userTombstones] = await Promise.all([
     db
       .select()
       .from(recipes)
@@ -64,7 +64,12 @@ syncRouter.get('/', clerkAuth, async (c) => {
     db
       .select()
       .from(shoppingListItems)
-      .where(and(eq(shoppingListItems.userId, userId), gte(shoppingListItems.createdAt, since)))
+      .where(and(eq(shoppingListItems.userId, userId), gte(shoppingListItems.updatedAt, since)))
+      .all(),
+    db
+      .select()
+      .from(syncTombstones)
+      .where(and(eq(syncTombstones.userId, userId), gte(syncTombstones.deletedAt, since)))
       .all(),
   ]);
 
@@ -77,8 +82,12 @@ syncRouter.get('/', clerkAuth, async (c) => {
       photos: userPhotos,
       inventory: userInventory,
       shoppingList: userShoppingList,
+      deletedRecipeIds: userTombstones.filter((item) => item.entityType === 'recipe').map((item) => item.entityId),
+      deletedBatchIds: userTombstones.filter((item) => item.entityType === 'batch').map((item) => item.entityId),
+      deletedInventoryIds: userTombstones.filter((item) => item.entityType === 'inventory').map((item) => item.entityId),
+      deletedShoppingListIds: userTombstones.filter((item) => item.entityType === 'shoppingList').map((item) => item.entityId),
+      syncedAt: new Date().toISOString(),
     },
-    syncedAt: new Date().toISOString(),
   });
 });
 
@@ -96,6 +105,8 @@ const pushSchema = z.object({
   shoppingList: z.array(z.record(z.any())).default([]),
   deletedRecipeIds: z.array(z.string()).default([]),
   deletedBatchIds: z.array(z.string()).default([]),
+  deletedInventoryIds: z.array(z.string()).default([]),
+  deletedShoppingListIds: z.array(z.string()).default([]),
 });
 
 syncRouter.post('/push', clerkAuth, async (c) => {
@@ -115,6 +126,8 @@ syncRouter.post('/push', clerkAuth, async (c) => {
     shoppingList: shoppingListOps,
     deletedRecipeIds,
     deletedBatchIds,
+    deletedInventoryIds,
+    deletedShoppingListIds,
   } = parse.data;
 
   if (recipeOps.length > 0) {
@@ -198,7 +211,7 @@ syncRouter.post('/push', clerkAuth, async (c) => {
         return c.json({ error: 'Forbidden shopping list id', id: item.id }, 403);
       }
 
-      const safeItem = { ...item, userId: auth.userId };
+      const safeItem = { ...item, userId: auth.userId, updatedAt: new Date() };
       if (existing) {
         await db.update(shoppingListItems).set(safeItem as any).where(and(eq(shoppingListItems.id, item.id), eq(shoppingListItems.userId, auth.userId)));
       } else {
@@ -207,12 +220,38 @@ syncRouter.post('/push', clerkAuth, async (c) => {
     }
   }
 
-  for (const id of deletedRecipeIds) {
-    await db.delete(recipes).where(and(eq(recipes.id, id), eq(recipes.userId, auth.userId)));
+  async function deleteWithTombstone(
+    entityType: 'recipe' | 'batch' | 'inventory' | 'shoppingList',
+    ids: string[],
+    table: typeof recipes | typeof batches | typeof inventoryItems | typeof shoppingListItems,
+  ) {
+    for (const id of ids) {
+      const existing = await db.select().from(table as any).where(eq((table as any).id, id)).get() as { userId?: string } | undefined;
+      if (!existing) continue;
+      if (existing.userId !== auth.userId) {
+        throw new Error(`Forbidden ${entityType} id`);
+      }
+      await db.delete(table as any).where(and(eq((table as any).id, id), eq((table as any).userId, auth.userId)));
+      await db.insert(syncTombstones).values({
+        id: `${auth.userId}:${entityType}:${id}`,
+        userId: auth.userId,
+        entityType,
+        entityId: id,
+        deletedAt: new Date(),
+      }).onConflictDoUpdate({
+        target: syncTombstones.id,
+        set: { deletedAt: new Date() },
+      });
+    }
   }
 
-  for (const id of deletedBatchIds) {
-    await db.delete(batches).where(and(eq(batches.id, id), eq(batches.userId, auth.userId)));
+  try {
+    await deleteWithTombstone('recipe', deletedRecipeIds, recipes);
+    await deleteWithTombstone('batch', deletedBatchIds, batches);
+    await deleteWithTombstone('inventory', deletedInventoryIds, inventoryItems);
+    await deleteWithTombstone('shoppingList', deletedShoppingListIds, shoppingListItems);
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : 'Forbidden delete id' }, 403);
   }
 
   return c.json({
@@ -226,6 +265,8 @@ syncRouter.post('/push', clerkAuth, async (c) => {
       shoppingList: shoppingListOps.length,
       deletedRecipes: deletedRecipeIds.length,
       deletedBatches: deletedBatchIds.length,
+      deletedInventory: deletedInventoryIds.length,
+      deletedShoppingList: deletedShoppingListIds.length,
     },
   });
 });

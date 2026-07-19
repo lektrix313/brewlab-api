@@ -187,6 +187,15 @@ export const shoppingListItems = sqliteTable('shopping_list_items', {
   purchased: integer('purchased', { mode: 'boolean' }).notNull().default(false),
   linkedInventoryItemId: text('linked_inventory_item_id'),
   createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
+});
+
+export const syncTombstones = sqliteTable('sync_tombstones', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  entityType: text('entity_type').notNull(),
+  entityId: text('entity_id').notNull(),
+  deletedAt: integer('deleted_at', { mode: 'timestamp' }).notNull().$defaultFn(() => new Date()),
 });
 
 export const batchCosts = sqliteTable('batch_costs', {
