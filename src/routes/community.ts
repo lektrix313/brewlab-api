@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import type { Env } from '../db/client';
 import { clerkAuth, optionalAuth } from '../middleware/auth';
+import { queueCommunityPush } from '../lib/push';
 
 const community = new Hono<{ Bindings: Env }>();
 const json = (value: unknown, fallback: unknown) => { try { return typeof value === 'string' ? JSON.parse(value) : value ?? fallback; } catch { return fallback; } };
@@ -102,7 +103,28 @@ community.post('/posts', clerkAuth, async (c) => {
   await c.env.DB.prepare(`INSERT INTO community_posts (id, author_id, batch_id, title, tasting_summary, worked_well, change_next_time, difficulty, recipe_snapshot, batch_summary, media, comments_enabled, visibility, comment_permission, source_post_id, source_author_id, change_summary, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', ?, ?, ?, ?, ?, ?, ?, ?)`)
     .bind(id, auth.userId, body.batchId || null, body.title, body.tastingSummary || null, body.workedWell || null, body.changeNextTime || null, body.difficulty, JSON.stringify(body.recipeSnapshot), body.batchSummary ? JSON.stringify(body.batchSummary) : null, body.commentsEnabled ? 1 : 0, body.visibility, body.commentPermission, body.sourcePostId || null, body.sourceAuthorId || null, body.changeSummary || null, now, now).run();
   await c.env.DB.prepare('UPDATE community_posts SET media = ? WHERE id = ?').bind(JSON.stringify(body.media), id).run();
-  const row = await c.env.DB.prepare(`${postSelect} WHERE p.id = ?`).bind(id).first<Record<string, unknown>>(); return c.json({ data: shapePost(row!) }, 201);
+  const row = await c.env.DB.prepare(`${postSelect} WHERE p.id = ?`).bind(id).first<Record<string, unknown>>();
+  if (body.visibility !== 'private') {
+    const mateClause = body.visibility === 'mates'
+      ? `AND EXISTS (SELECT 1 FROM follows reverse WHERE reverse.follower_id = f.following_id AND reverse.following_id = f.follower_id AND reverse.status = 'accepted')`
+      : '';
+    const recipients = await c.env.DB.prepare(`SELECT f.follower_id FROM follows f
+      JOIN profiles recipient ON recipient.user_id = f.follower_id
+      WHERE f.following_id = ? AND f.status = 'accepted' AND f.notify_posts = 1
+        AND recipient.notify_followed_posts = 1 ${mateClause}
+        AND NOT EXISTS (SELECT 1 FROM user_moderation_edges edge WHERE edge.kind IN ('mute', 'block')
+          AND edge.actor_id = f.follower_id AND edge.subject_id = f.following_id)`)
+      .bind(auth.userId).all<{ follower_id: string }>();
+    await Promise.all((recipients.results || []).map((recipient) => queueCommunityPush(c.env, {
+      userId: recipient.follower_id,
+      key: `new-brew:${id}:${recipient.follower_id}`,
+      kind: 'followed-brew',
+      title: `${String(row?.display_name || 'A brewing mate')} posted a new brew`,
+      body: `${body.title} has just landed in your Following feed. Fancy a look?`,
+      deepLink: `/community/post/${id}`,
+    })));
+  }
+  return c.json({ data: shapePost(row!) }, 201);
 });
 
 community.get('/posts/:id/comments', optionalAuth, async (c) => {

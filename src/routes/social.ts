@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import type { Env } from '../db/client';
 import { clerkAuth, optionalAuth } from '../middleware/auth';
+import { queueCommunityPush } from '../lib/push';
 
 type Row = Record<string, unknown>;
 type Auth = { userId: string; email: string };
@@ -44,7 +45,7 @@ async function relationship(env: Env, viewerId: string | undefined, subjectId: s
     return { follows: false, followed_by: false, request_pending: false, is_mate: false, is_muted: false, is_restricted: false, is_blocked: false };
   }
   const [outgoing, incoming, edges] = await Promise.all([
-    env.DB.prepare('SELECT status FROM follows WHERE follower_id = ? AND following_id = ?').bind(viewerId, subjectId).first<{ status: string }>(),
+    env.DB.prepare('SELECT status, notify_posts FROM follows WHERE follower_id = ? AND following_id = ?').bind(viewerId, subjectId).first<{ status: string; notify_posts: number }>(),
     env.DB.prepare('SELECT status FROM follows WHERE follower_id = ? AND following_id = ?').bind(subjectId, viewerId).first<{ status: string }>(),
     env.DB.prepare('SELECT actor_id, kind FROM user_moderation_edges WHERE (actor_id = ? AND subject_id = ?) OR (actor_id = ? AND subject_id = ?)')
       .bind(viewerId, subjectId, subjectId, viewerId).all<{ actor_id: string; kind: string }>(),
@@ -61,6 +62,7 @@ async function relationship(env: Env, viewerId: string | undefined, subjectId: s
     is_muted: ownEdges.some((edge) => edge.kind === 'mute'),
     is_restricted: ownEdges.some((edge) => edge.kind === 'restrict'),
     is_blocked: blocked,
+    notify_posts: follows && Boolean(outgoing?.notify_posts),
   };
 }
 
@@ -149,6 +151,33 @@ social.patch('/profile', clerkAuth, async (c) => {
   return c.json({ data: await shapeProfile(c.env, row!, auth.userId) });
 });
 
+const notificationPreferences = z.object({
+  followers: z.boolean().optional(),
+  followedBrews: z.boolean().optional(),
+});
+
+social.get('/notification-preferences', clerkAuth, async (c) => {
+  const auth = c.get('auth')!;
+  await ensureProfile(c.env, auth.userId);
+  const row = await c.env.DB.prepare('SELECT notify_follows, notify_followed_posts FROM profiles WHERE user_id = ?')
+    .bind(auth.userId).first<{ notify_follows: number; notify_followed_posts: number }>();
+  return c.json({ data: { followers: Boolean(row?.notify_follows), followedBrews: Boolean(row?.notify_followed_posts) } });
+});
+
+social.patch('/notification-preferences', clerkAuth, async (c) => {
+  const auth = c.get('auth')!;
+  await ensureProfile(c.env, auth.userId);
+  const parsed = notificationPreferences.safeParse(await c.req.json());
+  if (!parsed.success) return c.json({ error: 'Invalid notification preferences' }, 400);
+  const current = await c.env.DB.prepare('SELECT notify_follows, notify_followed_posts FROM profiles WHERE user_id = ?')
+    .bind(auth.userId).first<{ notify_follows: number; notify_followed_posts: number }>();
+  const followers = parsed.data.followers ?? Boolean(current?.notify_follows);
+  const followedBrews = parsed.data.followedBrews ?? Boolean(current?.notify_followed_posts);
+  await c.env.DB.prepare('UPDATE profiles SET notify_follows = ?, notify_followed_posts = ?, updated_at = ? WHERE user_id = ?')
+    .bind(Number(followers), Number(followedBrews), now(), auth.userId).run();
+  return c.json({ data: { followers, followedBrews } });
+});
+
 social.get('/profiles/:id', optionalAuth, async (c) => {
   const viewer = c.get('auth')?.userId;
   const id = c.req.param('id');
@@ -186,12 +215,23 @@ social.post('/profiles/:id/follow', clerkAuth, async (c) => {
   if (!target) return c.json({ error: 'Profile not found' }, 404);
   const status = target.is_private ? 'pending' : 'accepted';
   const timestamp = now();
-  await c.env.DB.prepare(`INSERT INTO follows (follower_id, following_id, status, created_at, accepted_at) VALUES (?, ?, ?, ?, ?)
-    ON CONFLICT(follower_id, following_id) DO UPDATE SET status = excluded.status, accepted_at = excluded.accepted_at`)
+  await c.env.DB.prepare(`INSERT INTO follows (follower_id, following_id, status, notify_posts, created_at, accepted_at) VALUES (?, ?, ?, 1, ?, ?)
+    ON CONFLICT(follower_id, following_id) DO UPDATE SET status = excluded.status, notify_posts = 1, accepted_at = excluded.accepted_at`)
     .bind(auth.userId, targetId, status, timestamp, status === 'accepted' ? timestamp : null).run();
   const kind = status === 'pending' ? 'follow_request' : 'new_follower';
   await c.env.DB.prepare(`INSERT OR IGNORE INTO activity_events (id, recipient_id, actor_id, kind, entity_type, entity_id, dedupe_key, created_at) VALUES (?, ?, ?, ?, 'profile', ?, ?, ?)`)
     .bind(`activity-${crypto.randomUUID()}`, targetId, auth.userId, kind, auth.userId, `${kind}:${auth.userId}:${targetId}`, timestamp).run();
+  if (target.notify_follows) {
+    const actor = await c.env.DB.prepare('SELECT display_name FROM profiles WHERE user_id = ?').bind(auth.userId).first<{ display_name: string }>();
+    await queueCommunityPush(c.env, {
+      userId: targetId,
+      key: `${kind}:${auth.userId}:${targetId}`,
+      kind,
+      title: status === 'pending' ? 'New follow request' : 'A new brewer is following you',
+      body: `${actor?.display_name || 'A brewer'} ${status === 'pending' ? 'would like to follow your brew shelf.' : 'is now following your brews.'}`,
+      deepLink: `/community/profile/${auth.userId}`,
+    });
+  }
   const rel = await relationship(c.env, auth.userId, targetId);
   if (rel.is_mate) {
     const pair = [auth.userId, targetId].sort().join(':');
@@ -208,6 +248,17 @@ social.delete('/profiles/:id/follow', clerkAuth, async (c) => {
   const auth = c.get('auth')!;
   await c.env.DB.prepare('DELETE FROM follows WHERE follower_id = ? AND following_id = ?').bind(auth.userId, c.req.param('id')).run();
   return c.json({ data: { removed: true } });
+});
+
+social.patch('/profiles/:id/post-notifications', clerkAuth, async (c) => {
+  const auth = c.get('auth')!;
+  const parsed = z.object({ enabled: z.boolean() }).safeParse(await c.req.json());
+  if (!parsed.success) return c.json({ error: 'Invalid notification preference' }, 400);
+  const result = await c.env.DB.prepare(`UPDATE follows SET notify_posts = ?
+    WHERE follower_id = ? AND following_id = ? AND status = 'accepted'`)
+    .bind(Number(parsed.data.enabled), auth.userId, c.req.param('id')).run();
+  if (!result.meta.changes) return c.json({ error: 'Follow this brewer before changing their alerts' }, 409);
+  return c.json({ data: { enabled: parsed.data.enabled } });
 });
 
 social.get('/follow-requests', clerkAuth, async (c) => {

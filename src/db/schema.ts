@@ -23,6 +23,8 @@ export const profiles = sqliteTable('profiles', {
   defaultPostVisibility: text('default_post_visibility').notNull().default('public'),
   commentPermission: text('comment_permission').notNull().default('everyone'),
   mentionPermission: text('mention_permission').notNull().default('everyone'),
+  notifyFollows: integer('notify_follows', { mode: 'boolean' }).notNull().default(true),
+  notifyFollowedPosts: integer('notify_followed_posts', { mode: 'boolean' }).notNull().default(true),
   createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
 });
@@ -31,7 +33,7 @@ export const follows = sqliteTable('follows', {
   followerId: text('follower_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   followingId: text('following_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   status: text('status').notNull().default('pending'),
-  notifyPosts: integer('notify_posts', { mode: 'boolean' }).notNull().default(false),
+  notifyPosts: integer('notify_posts', { mode: 'boolean' }).notNull().default(true),
   createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
   acceptedAt: integer('accepted_at', { mode: 'timestamp' }),
 });
