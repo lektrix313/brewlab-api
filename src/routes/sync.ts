@@ -130,6 +130,15 @@ syncRouter.post('/push', clerkAuth, async (c) => {
     deletedShoppingListIds,
   } = parse.data;
 
+  async function clearTombstone(entityType: string, entityId: unknown) {
+    if (typeof entityId !== 'string') return;
+    await db.delete(syncTombstones).where(and(
+      eq(syncTombstones.userId, auth.userId),
+      eq(syncTombstones.entityType, entityType),
+      eq(syncTombstones.entityId, entityId),
+    ));
+  }
+
   if (recipeOps.length > 0) {
     for (const r of recipeOps) {
       const existing = await db.select().from(recipes).where(eq(recipes.id, r.id)).get();
@@ -143,6 +152,7 @@ syncRouter.post('/push', clerkAuth, async (c) => {
       } else {
         await db.insert(recipes).values(safeRecipe as any);
       }
+      await clearTombstone('recipe', r.id);
     }
   }
 
@@ -159,6 +169,7 @@ syncRouter.post('/push', clerkAuth, async (c) => {
       } else {
         await db.insert(batches).values(safeBatch as any);
       }
+      await clearTombstone('batch', b.id);
     }
   }
 
@@ -201,6 +212,7 @@ syncRouter.post('/push', clerkAuth, async (c) => {
       } else {
         await db.insert(inventoryItems).values(safeItem as any);
       }
+      await clearTombstone('inventory', item.id);
     }
   }
 
@@ -217,6 +229,7 @@ syncRouter.post('/push', clerkAuth, async (c) => {
       } else {
         await db.insert(shoppingListItems).values(safeItem as any);
       }
+      await clearTombstone('shoppingList', item.id);
     }
   }
 
